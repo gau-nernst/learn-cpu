@@ -9,10 +9,10 @@ Resources:
 
 Kernel name      | Time (ms) | % of Apple Accelerate
 -----------------|-----------|----------------------
-Apple Accelerate |     11.83 | 100.00%
-Naive matmul     |  4,390.78 |   0.27%
-Tile matmul      |    531.83 |   2.22%
-NEON intrinsics  |    413.67 |   2.86%
+Apple Accelerate |      1.93 | 100.00%
+Naive matmul     |    879.26 |   0.22%
+Tile matmul      |    107.61 |   1.79%
+NEON intrinsics  |     85.41 |   2.26%
 
 Lessons learned:
 - NEON has Q-registers (128-bit) and D-registers (64-bit). Intrinsics using Q-registers has suffix `q` e.g. `vld1q_f32()`

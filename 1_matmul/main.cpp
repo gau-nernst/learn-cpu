@@ -31,7 +31,7 @@ void check(const float *A, const float *B, int M, int N) {
 }
 
 template <typename F>
-float benchmark(F f, int n = 5) {
+float benchmark(F f, int n = 100) {
   f();  // warmup
 
   auto t1 = std::chrono::high_resolution_clock::now();
@@ -40,7 +40,7 @@ float benchmark(F f, int n = 5) {
   auto t2 = std::chrono::high_resolution_clock::now();
 
   std::chrono::duration<float, std::milli> duration = t2 - t1;
-  return duration.count();
+  return duration.count() / n;
 }
 
 
@@ -74,16 +74,16 @@ int main(int argc, char *argv[]) {
   check(C_naive, C_tile, M, N);
   check(C_naive, C_neon, M, N);
 
-  printf("Naive matmul: %.2fms\n",
-         benchmark([A, B, C_naive]() {
-          naive_matmul(A, B, C_naive, M, N, K);
-         }));
   printf("Apple Accelerate: %.2fms\n",
          benchmark([A, B, C_blas]() {
             cblas_sgemm(CblasRowMajor, CblasNoTrans, CblasTrans,
                         M, N, K, 1.0f, A, M, B, N,
                         0.0f, C_blas, M);
          }));
+  printf("Naive matmul: %.2fms\n",
+         benchmark([A, B, C_naive]() {
+          naive_matmul(A, B, C_naive, M, N, K);
+         }, 5));
   // tune on Apple M1
   printf("Tile matmul: %.2fms\n",
          benchmark([A, B, C_tile]() {

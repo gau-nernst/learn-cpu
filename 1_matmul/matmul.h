@@ -73,8 +73,7 @@ void neon_mma_m4n4k4(const float *A,
       B_reg.val[k] = vld1q_f32(B + k * B_row_stride);
   }
 
-  for (int m = 0; m < 4; m++)
-  {
+  for (int m = 0; m < 4; m++) {
     // this is iterating along k-dim
     acc[m] = vfmaq_laneq_f32(acc[m], B_reg.val[0], A_reg.val[m], 0);
     acc[m] = vfmaq_laneq_f32(acc[m], B_reg.val[1], A_reg.val[m], 1);
@@ -83,17 +82,14 @@ void neon_mma_m4n4k4(const float *A,
   }
 }
 
-void neon_matmul(const float *A, const float *B, float *C, int M, int N, int K)
-{
+void neon_matmul(const float *A, const float *B, float *C, int M, int N, int K) {
   // NEON registers are 128-bit (16-byte) -> 4 elements of FP32
   const int BLOCK_M = 4;
   const int BLOCK_N = 4;
   const int BLOCK_K = 4;
 
-  for (int block_m = 0; block_m < M; block_m += BLOCK_M)
-  {
-    for (int block_n = 0; block_n < N; block_n += BLOCK_N)
-    {
+  for (int block_m = 0; block_m < M; block_m += BLOCK_M) {
+    for (int block_n = 0; block_n < N; block_n += BLOCK_N) {
       // we will do MMA with m4n4k4
       float32x4_t acc[4];
       for (int m = 0; m < 4; m++)

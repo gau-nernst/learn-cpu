@@ -18,6 +18,7 @@ void naive_matmul(const float *A, const float *B, float *C, int M, int N, int K)
 
 template <int VERSION, int BLOCK_M, int BLOCK_N, int BLOCK_K>
 void tile_matmul(const float *A, const float *B, float *C, int M, int N, int K) {
+#pragma omp parallel for
   for (int block_m = 0; block_m < M; block_m += BLOCK_M) {
     for (int block_n = 0; block_n < N; block_n += BLOCK_N) {
       float acc[BLOCK_M][BLOCK_N] = {0.0f};
@@ -113,6 +114,7 @@ void neon_matmul(const float *A, const float *B, float *C, int M, int N, int K) 
   const int BLOCK_N = 4;
   const int BLOCK_K = 4;
 
+#pragma omp parallel for
   for (int block_m = 0; block_m < M; block_m += BLOCK_M) {
     for (int block_n = 0; block_n < N; block_n += BLOCK_N) {
       // we will do MMA with m4n4k4

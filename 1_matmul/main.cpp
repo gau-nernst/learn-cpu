@@ -51,47 +51,59 @@ int main(int argc, char *argv[]) {
 
   float *A = new float[M * K];
   float *B = new float[N * K];
-  float *C_naive = new float[M * N];
-  float *C_tile = new float[M * N];
-  float *C_neon = new float[M * N];
-  float *C_blas = new float[M * N];
+  float *C_ref = new float[M * N];
+  float *C = new float[M * N];
 
   randn_(A, M * K);
   randn_(B, N * K);
 
-  naive_matmul(A, B, C_naive, M, N, K);  // ref impl
+  std::fill(C_ref, C_ref + M * N, 0.0f);
+  naive_matmul(A, B, C_ref, M, N, K);  // ref impl
+
+  std::fill(C, C + M * N, 0.0f);
   cblas_sgemm(CblasRowMajor,  // layout
               CblasNoTrans,  // transpose A
               CblasTrans,  // tranpose B
               M, N, K, 1.0f,
               A, M,
               B, N,
-              0.0f, C_blas, M);
-  tile_matmul<8, 8, 4>(A, B, C_tile, M, N, K);
-  neon_matmul(A, B, C_neon, M, N, K);
+              0.0f, C, M);
+  check(C_ref, C, M, N);
 
-  check(C_naive, C_blas, M, N);
-  check(C_naive, C_tile, M, N);
-  check(C_naive, C_neon, M, N);
+  std::fill(C, C + M * N, 0.0f);
+  tile_matmul<1, 4, 4, 4>(A, B, C, M, N, K);
+  check(C_ref, C, M, N);
+
+  std::fill(C, C + M * N, 0.0f);
+  tile_matmul<2, 4, 4, 4>(A, B, C, M, N, K);
+  check(C_ref, C, M, N);
+
+  std::fill(C, C + M * N, 0.0f);
+  neon_matmul(A, B, C, M, N, K);
+  check(C_ref, C, M, N);
 
   printf("Apple Accelerate: %.2fms\n",
-         benchmark([A, B, C_blas]() {
+         benchmark([A, B, C]() {
             cblas_sgemm(CblasRowMajor, CblasNoTrans, CblasTrans,
                         M, N, K, 1.0f, A, M, B, N,
-                        0.0f, C_blas, M);
+                        0.0f, C, M);
          }));
   printf("Naive matmul: %.2fms\n",
-         benchmark([A, B, C_naive]() {
-          naive_matmul(A, B, C_naive, M, N, K);
+         benchmark([A, B, C]() {
+          naive_matmul(A, B, C, M, N, K);
          }, 5));
   // tune on Apple M1
-  printf("Tile matmul: %.2fms\n",
-         benchmark([A, B, C_tile]() {
-          tile_matmul<8, 8, 4>(A, B, C_tile, M, N, K);
+  printf("Tile matmul v1: %.2fms\n",
+         benchmark([A, B, C]() {
+          tile_matmul<1, 4, 4, 4>(A, B, C, M, N, K);
          }));
-  printf("Neon matmul: %.2fms\n",
-         benchmark([A, B, C_tile]() {
-          neon_matmul(A, B, C_tile, M, N, K);
+  printf("Tile matmul v2: %.2fms\n",
+         benchmark([A, B, C]() {
+          tile_matmul<2, 4, 4, 4>(A, B, C, M, N, K);
+         }));
+  printf("NEON matmul: %.2fms\n",
+         benchmark([A, B, C]() {
+          neon_matmul(A, B, C, M, N, K);
          }));
 
   return 0;

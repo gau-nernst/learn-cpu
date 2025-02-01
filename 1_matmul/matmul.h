@@ -16,27 +16,52 @@ void naive_matmul(const float *A, const float *B, float *C, int M, int N, int K)
     }
 }
 
-template <int BLOCK_M, int BLOCK_N, int BLOCK_K>
+template <int VERSION, int BLOCK_M, int BLOCK_N, int BLOCK_K>
 void tile_matmul(const float *A, const float *B, float *C, int M, int N, int K) {
   for (int block_m = 0; block_m < M; block_m += BLOCK_M) {
     for (int block_n = 0; block_n < N; block_n += BLOCK_N) {
       float acc[BLOCK_M][BLOCK_N] = {0.0f};
 
       for (int block_k = 0; block_k < K; block_k += BLOCK_K) {
-        for (int idx_m = 0; idx_m < BLOCK_M; idx_m++)
-          for (int idx_n = 0; idx_n < BLOCK_N; idx_n++) {
-            float A_reg[BLOCK_K], B_reg[BLOCK_K];
+        if constexpr (VERSION == 1) {
+          for (int idx_m = 0; idx_m < BLOCK_M; idx_m++)
+            for (int idx_n = 0; idx_n < BLOCK_N; idx_n++) {
+              float A_reg[BLOCK_K], B_reg[BLOCK_K];
 
-            // load A and B to registers
-            for (int idx_k = 0; idx_k < BLOCK_K; idx_k++) {
-              A_reg[idx_k] = A[(block_m + idx_m) * K + (block_k + idx_k)];
-              B_reg[idx_k] = B[(block_n + idx_n) * K + (block_k + idx_k)];
+              // load A and B to registers
+              for (int idx_k = 0; idx_k < BLOCK_K; idx_k++) {
+                A_reg[idx_k] = A[(block_m + idx_m) * K + (block_k + idx_k)];
+                B_reg[idx_k] = B[(block_n + idx_n) * K + (block_k + idx_k)];
+              }
+
+              // dot product
+              for (int idx_k = 0; idx_k < BLOCK_K; idx_k++)
+                acc[idx_m][idx_n] += A_reg[idx_k] * B_reg[idx_k];
             }
+        }  // VERSION 0
 
-            // dot product
+        else if constexpr (VERSION == 2) {
+          float A_reg[BLOCK_M][BLOCK_K], B_reg[BLOCK_K][BLOCK_N];
+
+          // load A and B to registers
+          for (int idx_m = 0; idx_m < BLOCK_M; idx_m++)
             for (int idx_k = 0; idx_k < BLOCK_K; idx_k++)
-              acc[idx_m][idx_n] += A_reg[idx_k] * B_reg[idx_k];
-          }
+              A_reg[idx_m][idx_k] = A[(block_m + idx_m) * K + (block_k + idx_k)];
+          
+          for (int idx_n = 0; idx_n < BLOCK_N; idx_n++)
+            for (int idx_k = 0; idx_k < BLOCK_K; idx_k++)
+              B_reg[idx_k][idx_n] = B[(block_n + idx_n) * K + (block_k + idx_k)];
+
+          // outer product
+          for (int idx_k = 0; idx_k < BLOCK_K; idx_k++)
+            for (int idx_m = 0; idx_m < BLOCK_M; idx_m++)
+              for (int idx_n = 0; idx_n < BLOCK_N; idx_n++)
+                acc[idx_m][idx_n] += A_reg[idx_m][idx_k] * B_reg[idx_k][idx_n];
+        }  // VERSION 1
+        else {
+          static_assert(!sizeof(VERSION));
+        }
+
       } // BLOCK_K loop
 
       // write output tile (BLOCK_M, BLOCK_N)
@@ -61,7 +86,7 @@ void neon_mma_m4n4k4(const float *A,
   for (int m = 0; m < 4; m++)
     A_reg.val[m] = vld1q_f32(A + m * A_row_stride);
 
-  if (transpose_B) {
+  if constexpr (transpose_B) {
     // can't use for-loop here since `lane` (last argument) is required to be a constant integer
     // (and the compiler can't unroll + infer it to be constant automatically...)
     B_reg = vld4q_lane_f32(B + 0 * B_row_stride, B_reg, 0);

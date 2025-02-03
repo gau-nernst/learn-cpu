@@ -79,7 +79,11 @@ int main(int argc, char *argv[]) {
   check(C_ref, C, M, N);
 
   std::fill(C, C + M * N, 0.0f);
-  neon_matmul(A, B, C, M, N, K);
+  tile_2level_matmul<16, 16, 4, 4, 4, 4>(A, B, C, M, N, K);
+  check(C_ref, C, M, N);
+
+  std::fill(C, C + M * N, 0.0f);
+  neon_matmul<32, 16, 8>(A, B, C, M, N, K);
   check(C_ref, C, M, N);
 
   printf("Apple Accelerate: %.2fms\n",
@@ -101,9 +105,13 @@ int main(int argc, char *argv[]) {
          benchmark([A, B, C]() {
           tile_matmul<2, 4, 4, 4>(A, B, C, M, N, K);
          }));
+  printf("2-level Tile matmul: %.2fms\n",
+         benchmark([A, B, C]() {
+          tile_2level_matmul<32, 16, 8, 8, 4, 4>(A, B, C, M, N, K);
+         }));
   printf("NEON matmul: %.2fms\n",
          benchmark([A, B, C]() {
-          neon_matmul(A, B, C, M, N, K);
+          neon_matmul<32, 16, 8>(A, B, C, M, N, K);
          }));
 
   return 0;

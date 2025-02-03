@@ -1,5 +1,6 @@
 #pragma once
 
+// TODO: check for macOS
 #include <arm_neon.h>
 
 
@@ -7,6 +8,7 @@ void naive_matmul(const float *A, const float *B, float *C, int M, int N, int K)
   // assume A is row-major
   //        B is column-major
   //        C is row-major
+#pragma omp parallel for
   for (int im = 0; im < M; im++)
     for (int in = 0; in < N; in++) {
       float acc = 0.0f;
@@ -16,61 +18,116 @@ void naive_matmul(const float *A, const float *B, float *C, int M, int N, int K)
     }
 }
 
-template <int VERSION, int BLOCK_M, int BLOCK_N, int BLOCK_K>
+template <int VERSION, int TILE_M, int TILE_N, int TILE_K>
 void tile_matmul(const float *A, const float *B, float *C, int M, int N, int K) {
 #pragma omp parallel for
-  for (int block_m = 0; block_m < M; block_m += BLOCK_M) {
-    for (int block_n = 0; block_n < N; block_n += BLOCK_N) {
-      float acc[BLOCK_M][BLOCK_N] = {0.0f};
+  for (int tile_m = 0; tile_m < M; tile_m += TILE_M) {
+    for (int tile_n = 0; tile_n < N; tile_n += TILE_N) {
+      float acc[TILE_M][TILE_N] = {0.0f};
 
-      for (int block_k = 0; block_k < K; block_k += BLOCK_K) {
+      for (int tile_k = 0; tile_k < K; tile_k += TILE_K) {
         if constexpr (VERSION == 1) {
-          for (int idx_m = 0; idx_m < BLOCK_M; idx_m++)
-            for (int idx_n = 0; idx_n < BLOCK_N; idx_n++) {
-              float A_reg[BLOCK_K], B_reg[BLOCK_K];
+          for (int m = 0; m < TILE_M; m++)
+            for (int n = 0; n < TILE_N; n++) {
+              float A_reg[TILE_K], B_reg[TILE_K];
 
               // load A and B to registers
-              for (int idx_k = 0; idx_k < BLOCK_K; idx_k++) {
-                A_reg[idx_k] = A[(block_m + idx_m) * K + (block_k + idx_k)];
-                B_reg[idx_k] = B[(block_n + idx_n) * K + (block_k + idx_k)];
+              for (int k = 0; k < TILE_K; k++) {
+                A_reg[k] = A[(tile_m + m) * K + (tile_k + k)];
+                B_reg[k] = B[(tile_n + n) * K + (tile_k + k)];
               }
 
               // dot product
-              for (int idx_k = 0; idx_k < BLOCK_K; idx_k++)
-                acc[idx_m][idx_n] += A_reg[idx_k] * B_reg[idx_k];
+              for (int k = 0; k < TILE_K; k++)
+                acc[m][n] += A_reg[k] * B_reg[k];
             }
         }  // VERSION 0
 
         else if constexpr (VERSION == 2) {
-          float A_reg[BLOCK_M][BLOCK_K], B_reg[BLOCK_K][BLOCK_N];
+          float A_reg[TILE_M][TILE_K], B_reg[TILE_K][TILE_N];
 
           // load A and B to registers
-          for (int idx_m = 0; idx_m < BLOCK_M; idx_m++)
-            for (int idx_k = 0; idx_k < BLOCK_K; idx_k++)
-              A_reg[idx_m][idx_k] = A[(block_m + idx_m) * K + (block_k + idx_k)];
+          for (int m = 0; m < TILE_M; m++)
+            for (int k = 0; k < TILE_K; k++)
+              A_reg[m][k] = A[(tile_m + m) * K + (tile_k + k)];
           
-          for (int idx_n = 0; idx_n < BLOCK_N; idx_n++)
-            for (int idx_k = 0; idx_k < BLOCK_K; idx_k++)
-              B_reg[idx_k][idx_n] = B[(block_n + idx_n) * K + (block_k + idx_k)];
+          for (int n = 0; n < TILE_N; n++)
+            for (int k = 0; k < TILE_K; k++)
+              B_reg[k][n] = B[(tile_n + n) * K + (tile_k + k)];
 
           // outer product
-          for (int idx_k = 0; idx_k < BLOCK_K; idx_k++)
-            for (int idx_m = 0; idx_m < BLOCK_M; idx_m++)
-              for (int idx_n = 0; idx_n < BLOCK_N; idx_n++)
-                acc[idx_m][idx_n] += A_reg[idx_m][idx_k] * B_reg[idx_k][idx_n];
+          // this has better performance since for each (TILE_M,1) and (TILE_N,1)
+          // cached in L1, we can do more math ops (TILE_M x TILE_N to be exact).
+          // -> better arithmetic intensity.
+          for (int k = 0; k < TILE_K; k++)
+            for (int m = 0; m < TILE_M; m++)
+              for (int n = 0; n < TILE_N; n++)
+                acc[m][n] += A_reg[m][k] * B_reg[k][n];
         }  // VERSION 1
+
         else {
           static_assert(!sizeof(VERSION));
         }
 
-      } // BLOCK_K loop
+      } // TILE_K
 
-      // write output tile (BLOCK_M, BLOCK_N)
-      for (int idx_m = 0; idx_m < BLOCK_M; idx_m++)
-        for (int idx_n = 0; idx_n < BLOCK_N; idx_n++)
-          C[(block_m + idx_m) * N + (block_n + idx_n)] = acc[idx_m][idx_n];
-    }  // BLOCK_N loop
-  }  // BLOCK_M loop
+      // write output tile (TILE_M, TILE_N)
+      for (int m = 0; m < TILE_M; m++)
+        for (int n = 0; n < TILE_N; n++)
+          C[(tile_m + m) * N + (tile_n + n)] = acc[m][n];
+    }  // TILE_N
+  }  // TILE_M
+}
+
+template <
+  int TILE_M, int TILE_N, int TILE_K,
+  int MMA_M, int MMA_N, int MMA_K>
+void tile_2level_matmul(const float *A, const float *B, float *C, int M, int N, int K) {
+  static_assert(TILE_M % MMA_M == 0);
+  static_assert(TILE_N % MMA_N == 0);
+  static_assert(TILE_K % MMA_K == 0);
+
+  // the outer tiling is to take advantage of L2 cache.
+#pragma omp parallel for
+  for (int tile_m = 0; tile_m < M; tile_m += TILE_M) {
+    for (int tile_n = 0; tile_n < N; tile_n += TILE_N) {
+      const float *A_tile = A + tile_m * K;
+      const float *B_tile = B + tile_n * K;
+      float acc[TILE_M][TILE_N] = {0.0f};
+
+      for (int tile_k = 0; tile_k < K; tile_k += TILE_K) {
+
+        for (int mma_k = 0; mma_k < TILE_K; mma_k += MMA_K) {
+          for (int mma_m = 0; mma_m < TILE_M; mma_m += MMA_M) {
+            for (int mma_n = 0; mma_n < TILE_N; mma_n += MMA_N) {
+              float A_reg[MMA_M][MMA_K], B_reg[MMA_N][MMA_K];
+
+              for (int m = 0; m < MMA_M; m++)
+                for (int k = 0; k < MMA_K; k++)
+                  A_reg[m][k] = A_tile[(mma_m + m) * K + (mma_k + k)];
+
+              for (int n = 0; n < MMA_N; n++)
+                for (int k = 0; k < MMA_K; k++)
+                  B_reg[n][k] = B_tile[(mma_n + n) * K + (mma_k + k)];
+
+              for (int k = 0; k < MMA_K; k++)
+                for (int m = 0; m < MMA_M; m++)
+                  for (int n = 0; n < MMA_N; n++)
+                    acc[mma_m + m][mma_n + n] += A_reg[m][k] * B_reg[n][k];
+            }
+          }
+        }
+
+        A_tile += TILE_K;
+        B_tile += TILE_K;
+      } // TILE_K
+
+      // write output tile (TILE_M, TILE_N)
+      for (int m = 0; m < TILE_M; m++)
+        for (int n = 0; n < TILE_N; n++)
+          C[(tile_m + m) * N + (tile_n + n)] = acc[m][n];
+    }  // TILE_N
+  }  // TILE_M
 }
 
 // https://developer.arm.com/documentation/102467/0201/Example---matrix-multiplication
@@ -108,28 +165,48 @@ void neon_mma_m4n4k4(const float *A,
   }
 }
 
+template <int TILE_M, int TILE_N, int TILE_K>
 void neon_matmul(const float *A, const float *B, float *C, int M, int N, int K) {
-  // NEON registers are 128-bit (16-byte) -> 4 elements of FP32
-  const int BLOCK_M = 4;
-  const int BLOCK_N = 4;
-  const int BLOCK_K = 4;
+  // NEON registers are 128-bit (16-byte) -> FP32x4
+  constexpr int MMA_M = 4;
+  constexpr int MMA_N = 4;
+  constexpr int MMA_K = 4;
+
+  static_assert(TILE_M % MMA_M == 0);
+  static_assert(TILE_N % MMA_N == 0);
+  static_assert(TILE_K % MMA_K == 0);
 
 #pragma omp parallel for
-  for (int block_m = 0; block_m < M; block_m += BLOCK_M) {
-    for (int block_n = 0; block_n < N; block_n += BLOCK_N) {
-      // we will do MMA with m4n4k4
-      float32x4_t acc[4];
-      for (int m = 0; m < 4; m++)
-        acc[m] = vmovq_n_f32(0.0f);  // set to zeros
+  for (int tile_m = 0; tile_m < M; tile_m += TILE_M) {
+    for (int tile_n = 0; tile_n < N; tile_n += TILE_N) {
+      const float *A_tile = A + tile_m * K;
+      const float *B_tile = B + tile_n * K;
 
-      for (int block_k = 0; block_k < K; block_k += BLOCK_K)
-        neon_mma_m4n4k4<true>(A + block_m * K + block_k,
-                              B + block_n * K + block_k,
-                              K, K, acc);
+      float32x4_t acc[TILE_M / MMA_M][TILE_N / 4][4];
+      for (int m = 0; m < TILE_M; m += 4)
+        for (int n = 0; n < TILE_N; n += 4)
+          for (int i = 0; i < 4; i++)
+            acc[m / 4][n / 4][i] = vmovq_n_f32(0.0f);  // set to zeros
 
-      // write output tile (BLOCK_M, BLOCK_N)
-      for (int m = 0; m < 4; m++)
-        vst1q_f32(C + (block_m + m) * N + block_n, acc[m]);
-    }  // BLOCK_N loop
-  }  // BLOCK_M loop
+      for (int tile_k = 0; tile_k < K; tile_k += TILE_K) {
+
+        for (int mma_k = 0; mma_k < TILE_K; mma_k += MMA_K)
+          for (int mma_m = 0; mma_m < TILE_M; mma_m += MMA_M)
+            for (int mma_n = 0; mma_n < TILE_N; mma_n += MMA_N)
+              neon_mma_m4n4k4<true>(A_tile + mma_m * K + mma_k,
+                                    B_tile + mma_n * K + mma_k,
+                                    K, K,
+                                    acc[mma_m / 4][mma_n / 4]);
+        A_tile += TILE_K;
+        B_tile += TILE_K;
+      }
+
+      // write output tile (TILE_M, TILE_N)
+      for (int m = 0; m < TILE_M; m++)
+        for (int n = 0; n < TILE_N; n += 4)
+          vst1q_f32(C + (tile_m + m) * N + (tile_n + n),
+                    acc[m / 4][n / 4][m % 4]);
+
+    }  // TILE_N
+  }  // TILE_N
 }

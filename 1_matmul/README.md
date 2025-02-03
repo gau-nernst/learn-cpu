@@ -13,6 +13,14 @@ Resources:
 
 **Apple M1**, plugged in. `M=N=K=1024`
 
+```bash
+# single core
+clang++ *.cpp -O3 -o main -std=c++17 -framework Accelerate -DACCELERATE_NEW_LAPACK && ./main
+
+# with OpenMP
+$(brew --prefix llvm)/bin/clang++ *.cpp -O3 -o main -std=c++17 -fopenmp -framework Accelerate -DACCELERATE_NEW_LAPACK && ./main
+```
+
 Kernel name                    | Time (ms) | % of Apple Accelerate
 -------------------------------|-----------|----------------------
 Apple Accelerate               |      1.94 | 100.00%

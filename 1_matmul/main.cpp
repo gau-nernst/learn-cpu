@@ -3,8 +3,9 @@
 #include <stdio.h>
 #include <chrono>
 
-// TODO: only include this on macOS
+#ifdef __APPLE__
 #include <Accelerate/Accelerate.h>
+#endif
 
 
 void randn_(float *A, int N) {
@@ -25,7 +26,7 @@ void check(const float *A, const float *B, int M, int N) {
         // printf("Mismatch at m=%i, n=%i: A=%.2e, B=%.2e\n", m, n, A[idx], B[idx]);
       }
     }
-  
+
   const float mismatch_ratio = static_cast<float>(num_mismatch) / static_cast<float>(M * N);
   printf("Mismatch percent: %.2f%%\n", mismatch_ratio * 100);
 }
@@ -60,6 +61,7 @@ int main(int argc, char *argv[]) {
   std::fill(C_ref, C_ref + M * N, 0.0f);
   naive_matmul(A, B, C_ref, M, N, K);  // ref impl
 
+#ifdef __APPLE__
   std::fill(C, C + M * N, 0.0f);
   cblas_sgemm(CblasRowMajor,  // layout
               CblasNoTrans,  // transpose A
@@ -69,6 +71,7 @@ int main(int argc, char *argv[]) {
               B, N,
               0.0f, C, M);
   check(C_ref, C, M, N);
+#endif
 
   std::fill(C, C + M * N, 0.0f);
   tile_matmul<1, 4, 4, 4>(A, B, C, M, N, K);
@@ -82,16 +85,20 @@ int main(int argc, char *argv[]) {
   tile_2level_matmul<16, 16, 4, 4, 4, 4>(A, B, C, M, N, K);
   check(C_ref, C, M, N);
 
+#ifdef __ARM_NEON__
   std::fill(C, C + M * N, 0.0f);
   neon_matmul<32, 16, 8>(A, B, C, M, N, K);
   check(C_ref, C, M, N);
+#endif
 
+#ifdef __APPLE__
   printf("Apple Accelerate: %.2fms\n",
          benchmark([A, B, C]() {
             cblas_sgemm(CblasRowMajor, CblasNoTrans, CblasTrans,
                         M, N, K, 1.0f, A, M, B, N,
                         0.0f, C, M);
          }));
+#endif
   printf("Naive matmul: %.2fms\n",
          benchmark([A, B, C]() {
           naive_matmul(A, B, C, M, N, K);
@@ -109,10 +116,12 @@ int main(int argc, char *argv[]) {
          benchmark([A, B, C]() {
           tile_2level_matmul<32, 16, 8, 8, 4, 4>(A, B, C, M, N, K);
          }));
+#ifdef __ARM_NEON__
   printf("NEON matmul: %.2fms\n",
          benchmark([A, B, C]() {
           neon_matmul<32, 16, 8>(A, B, C, M, N, K);
          }));
+#endif
 
   return 0;
 }

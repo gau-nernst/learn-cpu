@@ -1,7 +1,9 @@
 #pragma once
 
-// TODO: check for macOS
+#include "assert.h"
+#ifdef __ARM_NEON__
 #include <arm_neon.h>
+#endif
 
 
 void naive_matmul(const float *A, const float *B, float *C, int M, int N, int K) {
@@ -41,7 +43,7 @@ void tile_matmul(const float *A, const float *B, float *C, int M, int N, int K) 
               for (int k = 0; k < TILE_K; k++)
                 acc[m][n] += A_reg[k] * B_reg[k];
             }
-        }  // VERSION 0
+        }  // VERSION 1
 
         else if constexpr (VERSION == 2) {
           float A_reg[TILE_M][TILE_K], B_reg[TILE_K][TILE_N];
@@ -50,7 +52,7 @@ void tile_matmul(const float *A, const float *B, float *C, int M, int N, int K) 
           for (int m = 0; m < TILE_M; m++)
             for (int k = 0; k < TILE_K; k++)
               A_reg[m][k] = A[(tile_m + m) * K + (tile_k + k)];
-          
+
           for (int n = 0; n < TILE_N; n++)
             for (int k = 0; k < TILE_K; k++)
               B_reg[k][n] = B[(tile_n + n) * K + (tile_k + k)];
@@ -63,10 +65,10 @@ void tile_matmul(const float *A, const float *B, float *C, int M, int N, int K) 
             for (int m = 0; m < TILE_M; m++)
               for (int n = 0; n < TILE_N; n++)
                 acc[m][n] += A_reg[m][k] * B_reg[k][n];
-        }  // VERSION 1
+        }  // VERSION 2
 
         else {
-          static_assert(!sizeof(VERSION));
+          assert(false);
         }
 
       } // TILE_K
@@ -130,6 +132,7 @@ void tile_2level_matmul(const float *A, const float *B, float *C, int M, int N, 
   }  // TILE_M
 }
 
+#ifdef __ARM_NEON__
 // https://developer.arm.com/documentation/102467/0201/Example---matrix-multiplication
 template <bool transpose_B>
 void neon_mma_m4n4k4(const float *A,
@@ -210,3 +213,4 @@ void neon_matmul(const float *A, const float *B, float *C, int M, int N, int K) 
     }  // TILE_N
   }  // TILE_N
 }
+#endif

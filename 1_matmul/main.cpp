@@ -74,20 +74,20 @@ int main(int argc, char *argv[]) {
 #endif
 
   std::fill(C, C + M * N, 0.0f);
-  tile_matmul<1, 4, 4, 4>(A, B, C, M, N, K);
+  tile_matmul<1, 4, 4, 1>(A, B, C, M, N, K);
   check(C_ref, C, M, N);
 
   std::fill(C, C + M * N, 0.0f);
-  tile_matmul<2, 4, 4, 4>(A, B, C, M, N, K);
+  tile_matmul<2, 4, 4, 1>(A, B, C, M, N, K);
   check(C_ref, C, M, N);
 
   std::fill(C, C + M * N, 0.0f);
-  tile_2level_matmul<16, 16, 4, 4, 4, 4>(A, B, C, M, N, K);
+  tile_2level_matmul<4, 4, 1, 4, 4, 1>(A, B, C, M, N, K);
   check(C_ref, C, M, N);
 
 #ifdef __ARM_NEON__
   std::fill(C, C + M * N, 0.0f);
-  neon_matmul<32, 16, 8>(A, B, C, M, N, K);
+  neon_matmul<16, 16, 8>(A, B, C, M, N, K);
   check(C_ref, C, M, N);
 #endif
 
@@ -106,20 +106,21 @@ int main(int argc, char *argv[]) {
   // tune on Apple M1
   printf("Tile matmul v1: %.2fms\n",
          benchmark([A, B, C]() {
-          tile_matmul<1, 4, 4, 4>(A, B, C, M, N, K);
+          tile_matmul<1, 4, 4, 1>(A, B, C, M, N, K);
          }));
   printf("Tile matmul v2: %.2fms\n",
          benchmark([A, B, C]() {
-          tile_matmul<2, 4, 4, 4>(A, B, C, M, N, K);
+          tile_matmul<2, 4, 4, 1>(A, B, C, M, N, K);
          }));
+  // not faster on Apple M1 with -ffast-math
   printf("2-level Tile matmul: %.2fms\n",
          benchmark([A, B, C]() {
-          tile_2level_matmul<32, 16, 8, 8, 4, 4>(A, B, C, M, N, K);
+          tile_2level_matmul<4, 4, 1, 4, 4, 1>(A, B, C, M, N, K);
          }));
 #ifdef __ARM_NEON__
   printf("NEON matmul: %.2fms\n",
          benchmark([A, B, C]() {
-          neon_matmul<32, 16, 8>(A, B, C, M, N, K);
+          neon_matmul<16, 16, 8>(A, B, C, M, N, K);
          }));
 #endif
 

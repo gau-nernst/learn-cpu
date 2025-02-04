@@ -6,7 +6,10 @@
 #endif
 
 
-void naive_matmul(const float *A, const float *B, float *C, int M, int N, int K) {
+void naive_matmul(const float * __restrict A,
+                  const float * __restrict B,
+                        float * __restrict C,
+                  int M, int N, int K) {
   // assume A is row-major
   //        B is column-major
   //        C is row-major
@@ -21,11 +24,14 @@ void naive_matmul(const float *A, const float *B, float *C, int M, int N, int K)
 }
 
 template <int VERSION, int TILE_M, int TILE_N, int TILE_K>
-void tile_matmul(const float *A, const float *B, float *C, int M, int N, int K) {
+void tile_matmul(const float * __restrict A,
+                 const float * __restrict B,
+                       float * __restrict C,
+                 int M, int N, int K) {
 #pragma omp parallel for
   for (int tile_m = 0; tile_m < M; tile_m += TILE_M) {
     for (int tile_n = 0; tile_n < N; tile_n += TILE_N) {
-      float acc[TILE_M][TILE_N] = {0.0f};
+      float acc[TILE_M][TILE_N] = {{0.0f}};
 
       for (int tile_k = 0; tile_k < K; tile_k += TILE_K) {
         if constexpr (VERSION == 1) {
@@ -84,7 +90,10 @@ void tile_matmul(const float *A, const float *B, float *C, int M, int N, int K) 
 template <
   int TILE_M, int TILE_N, int TILE_K,
   int MMA_M, int MMA_N, int MMA_K>
-void tile_2level_matmul(const float *A, const float *B, float *C, int M, int N, int K) {
+void tile_2level_matmul(const float * __restrict A,
+                        const float * __restrict B,
+                              float * __restrict C,
+                        int M, int N, int K) {
   static_assert(TILE_M % MMA_M == 0);
   static_assert(TILE_N % MMA_N == 0);
   static_assert(TILE_K % MMA_K == 0);
@@ -95,7 +104,7 @@ void tile_2level_matmul(const float *A, const float *B, float *C, int M, int N, 
     for (int tile_n = 0; tile_n < N; tile_n += TILE_N) {
       const float *A_tile = A + tile_m * K;
       const float *B_tile = B + tile_n * K;
-      float acc[TILE_M][TILE_N] = {0.0f};
+      float acc[TILE_M][TILE_N] = {{0.0f}};
 
       for (int tile_k = 0; tile_k < K; tile_k += TILE_K) {
 
@@ -135,8 +144,8 @@ void tile_2level_matmul(const float *A, const float *B, float *C, int M, int N, 
 #ifdef __ARM_NEON__
 // https://developer.arm.com/documentation/102467/0201/Example---matrix-multiplication
 template <bool transpose_B>
-void neon_mma_m4n4k4(const float *A,
-                     const float *B,
+void neon_mma_m4n4k4(const float * __restrict A,
+                     const float * __restrict B,
                      int A_row_stride,
                      int B_row_stride,
                      float32x4_t acc[4])
@@ -169,8 +178,12 @@ void neon_mma_m4n4k4(const float *A,
 }
 
 template <int TILE_M, int TILE_N, int TILE_K>
-void neon_matmul(const float *A, const float *B, float *C, int M, int N, int K) {
+void neon_matmul(const float * __restrict A,
+                 const float * __restrict B,
+                       float * __restrict C,
+                 int M, int N, int K) {
   // NEON registers are 128-bit (16-byte) -> FP32x4
+  // TODO: re-investigate this. this is slower than auto-vectorization
   constexpr int MMA_M = 4;
   constexpr int MMA_N = 4;
   constexpr int MMA_K = 4;
@@ -200,6 +213,7 @@ void neon_matmul(const float *A, const float *B, float *C, int M, int N, int K) 
                                     B_tile + mma_n * K + mma_k,
                                     K, K,
                                     acc[mma_m / 4][mma_n / 4]);
+
         A_tile += TILE_K;
         B_tile += TILE_K;
       }

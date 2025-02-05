@@ -99,6 +99,7 @@ void tile_2level_matmul(const float * __restrict A,
   static_assert(TILE_K % MMA_K == 0);
 
   // the outer tiling is to take advantage of L2 cache.
+  // something is wrong... it's slower than 1-level tiling
 #pragma omp parallel for
   for (int tile_m = 0; tile_m < M; tile_m += TILE_M) {
     for (int tile_n = 0; tile_n < N; tile_n += TILE_N) {

@@ -5,6 +5,10 @@
 
 #ifdef __APPLE__
 #include <Accelerate/Accelerate.h>
+#define BLAS_NAME "Apple Accelerate"
+#elif __has_include(<mkl_cblas.h>)
+#include "mkl_cblas.h"
+#define BLAS_NAME "Intel MKL"
 #endif
 
 
@@ -61,7 +65,7 @@ int main(int argc, char *argv[]) {
   std::fill(C_ref, C_ref + M * N, 0.0f);
   naive_matmul(A, B, C_ref, M, N, K);  // ref impl
 
-#ifdef __APPLE__
+#ifdef BLAS_NAME
   std::fill(C, C + M * N, 0.0f);
   cblas_sgemm(CblasRowMajor,  // layout
               CblasNoTrans,  // transpose A
@@ -91,8 +95,8 @@ int main(int argc, char *argv[]) {
   check(C_ref, C, M, N);
 #endif
 
-#ifdef __APPLE__
-  printf("Apple Accelerate: %.2fms\n",
+#ifdef BLAS_NAME
+  printf("%s: %.2fms\n", BLAS_NAME,
          benchmark([A, B, C]() {
             cblas_sgemm(CblasRowMajor, CblasNoTrans, CblasTrans,
                         M, N, K, 1.0f, A, M, B, N,
@@ -103,6 +107,8 @@ int main(int argc, char *argv[]) {
          benchmark([A, B, C]() {
           naive_matmul(A, B, C, M, N, K);
          }, 5));
+
+#ifdef __APPLE__
   // tune on Apple M1
   printf("Tile matmul v1: %.2fms\n",
          benchmark([A, B, C]() {
@@ -112,15 +118,20 @@ int main(int argc, char *argv[]) {
          benchmark([A, B, C]() {
           tile_matmul<2, 4, 4, 1>(A, B, C, M, N, K);
          }));
-  // not faster on Apple M1 with -ffast-math
-  printf("2-level Tile matmul: %.2fms\n",
-         benchmark([A, B, C]() {
-          tile_2level_matmul<4, 4, 1, 4, 4, 1>(A, B, C, M, N, K);
-         }));
-#ifdef __ARM_NEON__
   printf("NEON matmul: %.2fms\n",
          benchmark([A, B, C]() {
           neon_matmul<16, 16, 8>(A, B, C, M, N, K);
+         }));
+
+#else
+  // tune on Ryzen 5600
+  printf("Tile matmul v1: %.2fms\n",
+         benchmark([A, B, C]() {
+          tile_matmul<1, 4, 4, 4>(A, B, C, M, N, K);
+         }));
+  printf("Tile matmul v2: %.2fms\n",
+         benchmark([A, B, C]() {
+          tile_matmul<2, 4, 4, 2>(A, B, C, M, N, K);
          }));
 #endif
 

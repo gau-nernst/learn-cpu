@@ -54,10 +54,17 @@ int main(int argc, char *argv[]) {
   const int N = 1024;
   const int K = 1024;
 
-  float *A = new float[M * K];
-  float *B = new float[N * K];
-  float *C_ref = new float[M * N];
-  float *C = new float[M * N];
+  // float *A = new float[M * K];
+  // float *B = new float[N * K];
+  // float *C_ref = new float[M * N];
+  // float *C = new float[M * N];
+
+  // faster in some cases
+  const int alignment = 128;
+  float *A = reinterpret_cast<float *>(aligned_alloc(alignment, M * K * sizeof(float)));
+  float *B = reinterpret_cast<float *>(aligned_alloc(alignment, N * K * sizeof(float)));
+  float *C_ref = reinterpret_cast<float *>(aligned_alloc(alignment, M * N * sizeof(float)));
+  float *C = reinterpret_cast<float *>(aligned_alloc(alignment, M * N * sizeof(float)));
 
   randn_(A, M * K);
   randn_(B, N * K);

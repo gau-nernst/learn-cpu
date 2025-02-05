@@ -45,10 +45,11 @@ Kernel name                    | Time (ms) | % of Intel MKL
 -------------------------------|-----------|----------------
 Intel MKL                      |      3.20 | 100.00%
 Naive matmul                   |     82.18 |   3.89%
-&emsp; + OpenMP                |      9.93 |  32.23%
+&emsp; + aligned alloc 128     |     73.41 |   4.36%
+&emsp; + OpenMP                |      8.37 |  38.23%
 Tile matmul v1 (dot product)   |     72.38 |   4.42%
 Tile matmul v2 (outer product) |     57.54 |   5.56%
-&emsp; + OpenMP                |     11.43 |  28.00%
+&emsp; + OpenMP                |      9.44 |  33.90%
 
 TODO:
 - Investigate OpenMP thread scheduling and cache-friendliness?

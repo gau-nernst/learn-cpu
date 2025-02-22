@@ -3,14 +3,14 @@
 #include <stdio.h>
 #include <chrono>
 
-#ifdef __APPLE__
-#include <Accelerate/Accelerate.h>
-#define BLAS_NAME "Apple Accelerate"
-#elif __has_include(<mkl_cblas.h>)
-#include "mkl_cblas.h"
-#define BLAS_NAME "Intel MKL"
-#endif
+const int alignment = 128;
+const int M = 1024;
+const int N = 1024;
+const int K = 1024;
 
+// const int M = 4096;
+// const int N = 4096;
+// const int K = 4096;
 
 void randn_(float *A, int N) {
   static std::default_random_engine rng;
@@ -35,14 +35,50 @@ void check(const float *A, const float *B, int M, int N) {
   printf("Mismatch percent: %.2f%%\n", mismatch_ratio * 100);
 }
 
-template <typename F>
-float benchmark(F f, int n = 100) {
-  f();  // warmup
+typedef void MatmulFunc(const float * __restrict A,
+                        const float * __restrict B,
+                              float * __restrict C,
+                        int M, int N, int K);
+
+template <MatmulFunc f>
+float benchmark(int n = 100) {
+  float *A, *B, *C;
+
+  if (alignment == 0) {
+    A = new float[M * K];
+    B = new float[N * K];
+    C = new float[M * N];
+  }
+  else {
+    // faster in some cases
+    A = reinterpret_cast<float *>(aligned_alloc(alignment, M * K * sizeof(float)));
+    B = reinterpret_cast<float *>(aligned_alloc(alignment, N * K * sizeof(float)));
+    C = reinterpret_cast<float *>(aligned_alloc(alignment, M * N * sizeof(float)));
+  }
+
+  // re-fill A and B with random data to avoid cache re-use
+  randn_(A, M * K);
+  randn_(B, N * K);
+
+  // warmup
+  for (int i = 0; i < 3; i++)
+    f(A, B, C, M, N, K);
 
   auto t1 = std::chrono::high_resolution_clock::now();
   for (int i = 0; i < n; i++)
-    f();
+    f(A, B, C, M, N, K);
   auto t2 = std::chrono::high_resolution_clock::now();
+
+  if (alignment == 0) {
+    delete[] A;
+    delete[] B;
+    delete[] C;
+  }
+  else {
+    free(A);
+    free(B);
+    free(C);
+  }
 
   std::chrono::duration<float, std::milli> duration = t2 - t1;
   return duration.count() / n;
@@ -50,22 +86,23 @@ float benchmark(F f, int n = 100) {
 
 
 int main(int argc, char *argv[]) {
-  const int M = 1024;
-  const int N = 1024;
-  const int K = 1024;
+  // Apple M1 has 128KB L1 cache, and 12MB L2 cache
+  // Ryzen 5600 has 384KB L1 cache, 3MB L2 cache, and 32MB L3 cache
 
-  // float *A = new float[M * K];
-  // float *B = new float[N * K];
-  // float *C_ref = new float[M * N];
-  // float *C = new float[M * N];
-
-  // faster in some cases
-  const int alignment = 128;
-  float *A = reinterpret_cast<float *>(aligned_alloc(alignment, M * K * sizeof(float)));
-  float *B = reinterpret_cast<float *>(aligned_alloc(alignment, N * K * sizeof(float)));
-  float *C_ref = reinterpret_cast<float *>(aligned_alloc(alignment, M * N * sizeof(float)));
-  float *C = reinterpret_cast<float *>(aligned_alloc(alignment, M * N * sizeof(float)));
-
+  float *A, *B, *C, *C_ref;
+  if (alignment == 0) {
+    A = new float[M * K];
+    B = new float[N * K];
+    C = new float[M * N];
+    C_ref = new float[M * N];
+  }
+  else {
+    // faster in some cases
+    A = reinterpret_cast<float *>(aligned_alloc(alignment, M * K * sizeof(float)));
+    B = reinterpret_cast<float *>(aligned_alloc(alignment, N * K * sizeof(float)));
+    C = reinterpret_cast<float *>(aligned_alloc(alignment, M * N * sizeof(float)));
+    C_ref = reinterpret_cast<float *>(aligned_alloc(alignment, M * N * sizeof(float)));
+  }
   randn_(A, M * K);
   randn_(B, N * K);
 
@@ -74,13 +111,7 @@ int main(int argc, char *argv[]) {
 
 #ifdef BLAS_NAME
   std::fill(C, C + M * N, 0.0f);
-  cblas_sgemm(CblasRowMajor,  // layout
-              CblasNoTrans,  // transpose A
-              CblasTrans,  // tranpose B
-              M, N, K, 1.0f,
-              A, M,
-              B, N,
-              0.0f, C, M);
+  blas_matmul(A, B, C, M, N, K);
   check(C_ref, C, M, N);
 #endif
 
@@ -93,7 +124,7 @@ int main(int argc, char *argv[]) {
   check(C_ref, C, M, N);
 
   std::fill(C, C + M * N, 0.0f);
-  tile_2level_matmul<4, 4, 1, 4, 4, 1>(A, B, C, M, N, K);
+  tile_2level_matmul<8, 8, 4, 4, 2>(A, B, C, M, N, K);
   check(C_ref, C, M, N);
 
 #ifdef __ARM_NEON__
@@ -103,43 +134,19 @@ int main(int argc, char *argv[]) {
 #endif
 
 #ifdef BLAS_NAME
-  printf("%s: %.2fms\n", BLAS_NAME,
-         benchmark([A, B, C]() {
-            cblas_sgemm(CblasRowMajor, CblasNoTrans, CblasTrans,
-                        M, N, K, 1.0f, A, M, B, N,
-                        0.0f, C, M);
-         }));
+  printf("%s: %.2fms\n", BLAS_NAME, benchmark<blas_matmul>());
 #endif
-  printf("Naive matmul: %.2fms\n",
-         benchmark([A, B, C]() {
-          naive_matmul(A, B, C, M, N, K);
-         }, 5));
-
+  printf("Naive matmul: %.2fms\n", benchmark<naive_matmul>(5));
 #ifdef __APPLE__
   // tune on Apple M1
-  printf("Tile matmul v1: %.2fms\n",
-         benchmark([A, B, C]() {
-          tile_matmul<1, 4, 4, 1>(A, B, C, M, N, K);
-         }));
-  printf("Tile matmul v2: %.2fms\n",
-         benchmark([A, B, C]() {
-          tile_matmul<2, 4, 4, 1>(A, B, C, M, N, K);
-         }));
-  printf("NEON matmul: %.2fms\n",
-         benchmark([A, B, C]() {
-          neon_matmul<16, 16, 8>(A, B, C, M, N, K);
-         }));
-
+  printf("Tile matmul v1: %.2fms\n", benchmark<tile_matmul<1, 4, 4, 1>>());
+  printf("Tile matmul v2: %.2fms\n", benchmark<tile_matmul<2, 4, 4, 1>>());
+  printf("NEON matmul: %.2fms\n", benchmark<neon_matmul<16, 16, 8>>());
 #else
   // tune on Ryzen 5600
-  printf("Tile matmul v1: %.2fms\n",
-         benchmark([A, B, C]() {
-          tile_matmul<1, 4, 4, 4>(A, B, C, M, N, K);
-         }));
-  printf("Tile matmul v2: %.2fms\n",
-         benchmark([A, B, C]() {
-          tile_matmul<2, 4, 4, 2>(A, B, C, M, N, K);
-         }));
+  printf("Tile matmul v1: %.2fms\n", benchmark<tile_matmul<1, 4, 4, 4>>());
+  printf("Tile matmul v2: %.2fms\n", benchmark<tile_matmul<2, 4, 4, 2>>());
+  printf("2-level tile matmul: %.2fms\n", benchmark<tile_2level_matmul<16, 8, 4, 4, 2>>());
 #endif
 
   return 0;

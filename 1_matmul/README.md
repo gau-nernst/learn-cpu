@@ -2,6 +2,7 @@
 
 Resources:
 - https://www.cs.utexas.edu/~flame/pubs/GotoTOMS_revision.pdf (to be read...)
+- https://siboehm.com/articles/22/Fast-MMM-on-CPU
 - ARM NEON:
   - https://developer.arm.com/documentation/102467/0201/
   - https://arm-software.github.io/acle/neon_intrinsics/advsimd.html
@@ -10,6 +11,7 @@ Resources:
   - https://github.com/corsix/amx
   - https://zhen8838.github.io/2024/04/23/mac-amx_en/
 - AVX2 (TODO)
+- https://ppc.cs.aalto.fi/
 
 **Apple M1**, plugged in. `M=N=K=1024`
 
@@ -34,10 +36,12 @@ NEON intrinsics                |     31.48 |   6.32%
 **Ryzen 5600**. `M=N=K=1024`
 
 ```bash
-pip install mkl-devel
+g++ main.cpp -O3 -ffast-math -march=native -std=c++17 -Wall -o main && ./main
 
+# with Intel MKL
 # linker options generated with https://www.intel.com/content/www/us/en/developer/tools/oneapi/onemkl-link-line-advisor.html
 # change $CONDA_PREFIX to wherever your pip installs MKL to.
+pip install mkl-devel
 g++ main.cpp -O3 -ffast-math -march=native -std=c++17 -Wall -o main -I$CONDA_PREFIX/include -L$CONDA_PREFIX/lib -m64 -Wl,--no-as-needed -lmkl_intel_ilp64 -lmkl_intel_thread -lmkl_core -liomp5 -lpthread -lm -ldl && LD_LIBRARY_PATH=$CONDA_PREFIX/lib ./main
 ```
 
@@ -59,3 +63,4 @@ Lessons learned:
 - NEON's dot product and matrix multiply only support INT8 and BF16. For FP32, we have to use fused multiply-accumulate (FMA) instead, which operates directly on FP32x4 registers.
 - To enable auto-vectorization, use `-ffast-math`, which enables math ops re-ordering.
 - Apple M1 and Ryzen 5600 have very different optimal kernel parameters (tile size). Perhaps with sufficient knowledge about data movements and CPU cache, someone can explain the difference...
+- OpenMP: `parallel` (start parallel region, create thread pool), `for`, `schedule(static,1)`, `collapse(2)` (collapse 2 for loops), `nowait` (don't wait for sync after for loop), `critical` (only 1 thread execute at a time), `atomic` (use hardware atomic op).

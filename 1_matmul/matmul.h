@@ -48,10 +48,10 @@ void naive_matmul(const float * __restrict A,
 }
 
 template <int VERSION, int TILE_M, int TILE_N, int TILE_K>
-void tile_matmul(const float * __restrict A,
-                 const float * __restrict B,
-                       float * __restrict C,
-                 int M, int N, int K) {
+void register_tile_matmul(const float * __restrict A,
+                          const float * __restrict B,
+                                float * __restrict C,
+                          int M, int N, int K) {
   // divide output into tiles of (TILE_M, TILE_N).
   // each output tile (TILE_M, TILE_N) = (TILE_M, K) x (K, TILE_N)
   // can be computed by each thread independently.
@@ -116,6 +116,33 @@ void tile_matmul(const float * __restrict A,
           C[(tile_m + m) * N + (tile_n + n)] = acc[m][n];
     }  // TILE_N
   }  // TILE_M
+}
+
+template <int TILE_M, int TILE_N, int TILE_K>
+void l1_tile_matmul(const float * __restrict A,
+                    const float * __restrict B,
+                          float * __restrict C,
+                    int M, int N, int K) {
+#pragma omp parallel for collapse(2) schedule(static,1)
+  for (int tile_m = 0; tile_m < M; tile_m += TILE_M) {
+    for (int tile_n = 0; tile_n < N; tile_n += TILE_N) {
+      const float *A_tile = A + tile_m * K;
+      const float *B_tile = B + tile_n * K;
+      float C_tile[TILE_M][TILE_N] = {{0.0f}};
+
+      for (int tile_k = 0; tile_k < K; tile_k += TILE_K) {
+        // we want all tiles to fit in L1 cache
+        for (int m = 0; m < TILE_M; m++)
+          for (int n = 0; n < TILE_N; n++)
+            for (int k = 0; k < TILE_K; k++)
+              C_tile[m][n] += A_tile[m * K + (tile_k + k)] * B_tile[n * K + (tile_k + k)];
+
+        for (int m = 0; m < TILE_M; m++)
+          for (int n = 0; n < TILE_N; n++)
+            C[(tile_m + m) * N + (tile_n + n)] = C_tile[m][n];
+      }
+    }
+  }
 }
 
 template <

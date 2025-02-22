@@ -15,6 +15,8 @@ Resources:
 
 **Apple M1**, plugged in. `M=N=K=1024`
 
+128KB L1 cache (per core), and 12MB L2 cache (shared)
+
 ```bash
 # install google/benchmark
 brew install google-benchmark
@@ -37,6 +39,8 @@ Tile matmul v2 (outer product) |     26.73 |   7.44%
 NEON intrinsics                |     31.48 |   6.32%
 
 **Ryzen 5600**. `M=N=K=1024`
+
+32KB L1 data cache (per core), 512KB L2 cache (per core), and 32MB L3 cache (shared)
 
 ```bash
 # install google/benchmark
@@ -70,3 +74,4 @@ Lessons learned:
 - To enable auto-vectorization, use `-ffast-math`, which enables math ops re-ordering.
 - Apple M1 and Ryzen 5600 have very different optimal kernel parameters (tile size). Perhaps with sufficient knowledge about data movements and CPU cache, someone can explain the difference...
 - OpenMP: `parallel` (start parallel region, create thread pool), `for`, `schedule(static,1)`, `collapse(2)` (collapse 2 for loops), `nowait` (don't wait for sync after for loop), `critical` (only 1 thread execute at a time), `atomic` (use hardware atomic op).
+- Using OpenMP may (and will) generate different code. One example is the compiler fail to auto-vectorize when there is OpenMP. Be extra careful.

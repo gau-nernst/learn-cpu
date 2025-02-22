@@ -6,6 +6,12 @@ Profiling
 sudo perf stat -d ./main
 ```
 
+Output assembly
+
+```
+g++ -S
+```
+
 ```
 CPU max theoretical FLOP/s = per-core FLOP/s x num cores
                            = per-core FLOP/cycle x clock rate x num cores

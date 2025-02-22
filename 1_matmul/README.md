@@ -16,11 +16,14 @@ Resources:
 **Apple M1**, plugged in. `M=N=K=1024`
 
 ```bash
+# install google/benchmark
+brew install google-benchmark
+
 # single core
-clang++ main.cpp -O3 -ffast-math -march=native -std=c++17 -Wall -o main -framework Accelerate -DACCELERATE_NEW_LAPACK && ./main
+clang++ main.cc -Wall -std=c++17 -ffast-math -O3 -march=native -lbenchmark -lpthread -o main -framework Accelerate -DACCELERATE_NEW_LAPACK && ./main  --benchmark_counters_tabular=true
 
 # with OpenMP
-$(brew --prefix llvm)/bin/clang++ main.cpp -O3 -ffast-math -march=native -std=c++17 -Wall -fopenmp -o main -framework Accelerate -DACCELERATE_NEW_LAPACK && ./main
+$(brew --prefix llvm)/bin/clang++ main.cc -Wall -std=c++17 -ffast-math -O3 -march=native -lbenchmark -lpthread -o main -framework Accelerate -DACCELERATE_NEW_LAPACK -fopenmp && ./main --benchmark_counters_tabular=true
 
 ```
 
@@ -36,13 +39,16 @@ NEON intrinsics                |     31.48 |   6.32%
 **Ryzen 5600**. `M=N=K=1024`
 
 ```bash
-g++ main.cpp -O3 -ffast-math -march=native -std=c++17 -Wall -o main && ./main
+# install google/benchmark
+sudo apt install libbenchmark-dev
+
+g++ main.cc -Wall -std=c++17 -ffast-math -O3 -march=native -lbenchmark -lpthread -o main && ./main --benchmark_counters_tabular=true
 
 # with Intel MKL
 # linker options generated with https://www.intel.com/content/www/us/en/developer/tools/oneapi/onemkl-link-line-advisor.html
 # change $CONDA_PREFIX to wherever your pip installs MKL to.
 pip install mkl-devel
-g++ main.cpp -O3 -ffast-math -march=native -std=c++17 -Wall -o main -I$CONDA_PREFIX/include -L$CONDA_PREFIX/lib -m64 -Wl,--no-as-needed -lmkl_intel_ilp64 -lmkl_intel_thread -lmkl_core -liomp5 -lpthread -lm -ldl && LD_LIBRARY_PATH=$CONDA_PREFIX/lib ./main
+g++ main.cc -Wall -std=c++17 -ffast-math -O3 -march=native -lbenchmark -lpthread -o main -I$CONDA_PREFIX/include -L$CONDA_PREFIX/lib -m64 -Wl,--no-as-needed -lmkl_intel_ilp64 -lmkl_intel_thread -lmkl_core -liomp5 -lm -ldl && LD_LIBRARY_PATH=$CONDA_PREFIX/lib ./main --benchmark_counters_tabular=true
 ```
 
 Kernel name                    | Time (ms) | % of Intel MKL

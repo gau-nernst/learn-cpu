@@ -37,7 +37,7 @@ void naive_matmul(const float * __restrict A,
   //        B is column-major
   //        C is row-major
   // loading A and B both utilize memory well (contiguous in memory)
-#pragma omp parallel for
+#pragma omp parallel for schedule(static,1)
   for (int im = 0; im < M; im++)
     for (int in = 0; in < N; in++) {
       float acc = 0.0f;
@@ -55,7 +55,7 @@ void register_tile_matmul(const float * __restrict A,
   // divide output into tiles of (TILE_M, TILE_N).
   // each output tile (TILE_M, TILE_N) = (TILE_M, K) x (K, TILE_N)
   // can be computed by each thread independently.
-#pragma omp parallel for collapse(2) schedule(static,1)
+#pragma omp parallel for schedule(static,1)
   for (int tile_m = 0; tile_m < M; tile_m += TILE_M) {
     for (int tile_n = 0; tile_n < N; tile_n += TILE_N) {
 
@@ -126,80 +126,104 @@ void l1_tile_matmul(const float * __restrict A,
 #pragma omp parallel for collapse(2) schedule(static,1)
   for (int tile_m = 0; tile_m < M; tile_m += TILE_M) {
     for (int tile_n = 0; tile_n < N; tile_n += TILE_N) {
+      // we want all tiles A_tile[TILE_M][TILE_K], B_tile[TILE_N][TILE_K],
+      // and C_tile[TILE_M][TILE_N] to fit in L1 cache.
+
+      // this kernel is only different from register_tile kernel
+      // in the absence of explicitly loading A_reg[TILE_K] and B_reg[TILE_K].
+
       const float *A_tile = A + tile_m * K;
       const float *B_tile = B + tile_n * K;
+
+      // when TILE_M and TILE_N are large, C_tile will go to L1 cache.
       float C_tile[TILE_M][TILE_N] = {{0.0f}};
 
       for (int tile_k = 0; tile_k < K; tile_k += TILE_K) {
-        // we want all tiles to fit in L1 cache
         for (int m = 0; m < TILE_M; m++)
           for (int n = 0; n < TILE_N; n++)
             for (int k = 0; k < TILE_K; k++)
-              C_tile[m][n] += A_tile[m * K + (tile_k + k)] * B_tile[n * K + (tile_k + k)];
+              C_tile[m][n] += A_tile[m * K + k] * B_tile[n * K + k];
 
-        for (int m = 0; m < TILE_M; m++)
-          for (int n = 0; n < TILE_N; n++)
-            C[(tile_m + m) * N + (tile_n + n)] = C_tile[m][n];
+        A_tile += TILE_K;
+        B_tile += TILE_K;
       }
+
+      for (int m = 0; m < TILE_M; m++)
+        for (int n = 0; n < TILE_N; n++)
+          C[(tile_m + m) * N + (tile_n + n)] = C_tile[m][n];
     }
   }
 }
 
-template <
-  int OUTER_TILE_M, int OUTER_TILE_N,
-  int TILE_M, int TILE_N, int TILE_K>
+// currently this is slower
+template <int TILE_M1, int TILE_N1, int TILE_K1,
+          int TILE_M2, int TILE_N2, int TILE_K2>
 void tile_2level_matmul(const float * __restrict A,
                         const float * __restrict B,
                               float * __restrict C,
                         int M, int N, int K) {
-  static_assert(OUTER_TILE_M % TILE_M == 0);
-  static_assert(OUTER_TILE_N % TILE_N == 0);
+  static_assert(TILE_M1 % TILE_M2 == 0);
+  static_assert(TILE_N1 % TILE_N2 == 0);
 
-  // last level cache is usually shared among cores. hence, by
-  // re-ordering tiles, we can better utilize L2 cache.
-#pragma omp parallel
-{
-  for (int outer_tile_m = 0; outer_tile_m < M; outer_tile_m += OUTER_TILE_M) {
-    for (int outer_tile_n = 0; outer_tile_n < N; outer_tile_n += OUTER_TILE_N) {
+  // TILE_M1, TILE_N1, TILE_K1 are for L1 cache
+  // TILE_M2, TILE_N2, TILE_K2 are for register cache
 
-#pragma omp for nowait
-      for (int tile_m = 0; tile_m < OUTER_TILE_M; tile_m += TILE_M) {
-        for (int tile_n = 0; tile_n < OUTER_TILE_N; tile_n += TILE_N) {
-          const float *A_ = A + (outer_tile_m + tile_m) * K;
-          const float *B_ = B + (outer_tile_n + tile_n) * K;
+#pragma omp parallel for collapse(2) schedule(static,1)
+  for (int tile_m1 = 0; tile_m1 < M; tile_m1 += TILE_M1) {
+    for (int tile_n1 = 0; tile_n1 < N; tile_n1 += TILE_N1) {
+      // these will go to L1 cache
+      const float *A_tile1 = A + tile_m1 * K;
+      const float *B_tile1 = B + tile_n1 * K;
+      float acc_l1[TILE_M1][TILE_N1] = {{0.0f}};
 
-          float acc[TILE_M][TILE_N] = {{0.0f}};
+      for (int tile_k1 = 0; tile_k1 < K; tile_k1 += TILE_K1) {
 
-          for (int mma_k = 0; mma_k < K; mma_k += TILE_K) {
-            float A_reg[TILE_M][TILE_K], B_reg[TILE_N][TILE_K];
+        for (int tile_m2 = 0; tile_m2 < TILE_M1; tile_m2 += TILE_M2) {
+          for (int tile_n2 = 0; tile_n2 < TILE_N1; tile_n2 += TILE_N2) {
+            const float *A_tile2 = A_tile1 + tile_m2 * K;
+            const float *B_tile2 = B_tile1 + tile_n2 * K;
+            float acc_reg[TILE_M2][TILE_N2] = {{0.0f}};
 
-            for (int m = 0; m < TILE_M; m++)
-              for (int k = 0; k < TILE_K; k++)
-                A_reg[m][k] = A_[m * K + k];
+            for (int tile_k2 = 0; tile_k2 < TILE_K1; tile_k2 += TILE_K2) {
+              float A_reg[TILE_M2][TILE_K2],
+                    B_reg[TILE_N2][TILE_K2];
 
-            for (int n = 0; n < TILE_N; n++)
-              for (int k = 0; k < TILE_K; k++)
-                B_reg[n][k] = B_[n * K + k];
+              // L1 -> registers
+              for (int m = 0; m < TILE_M2; m++)
+                for (int k = 0; k < TILE_K2; k++)
+                  A_reg[m][k] = A_tile2[m * K + k];
 
-            for (int k = 0; k < TILE_K; k++)
-              for (int m = 0; m < TILE_M; m++)
-                for (int n = 0; n < TILE_N; n++)
-                  acc[m][n] += A_reg[m][k] * B_reg[n][k];
+              for (int n = 0; n < TILE_N2; n++)
+                for (int k = 0; k < TILE_K2; k++)
+                  B_reg[n][k] = B_tile2[n * K + k];
 
-            A_ += TILE_K;
-            B_ += TILE_K;
+              // K is outer loop to improve AI
+              for (int k = 0; k < TILE_K2; k++)
+                for (int m = 0; m < TILE_M2; m++)
+                  for (int n = 0; n < TILE_N2; n++)
+                    acc_reg[m][n] += A_reg[m][k] * B_reg[n][k];
+
+              A_tile2 += TILE_K2;
+              B_tile2 += TILE_K2;
+            }  // TILE_K2
+
+            // write registers -> L1
+            for (int m = 0; m < TILE_M2; m++)
+              for (int n = 0; n < TILE_N2; n++)
+                acc_l1[tile_m2 + m][tile_n2 + n] += acc_reg[m][n];
           }
-
-          // write output tile (TILE_M, TILE_N)
-          for (int m = 0; m < TILE_M; m++)
-            for (int n = 0; n < TILE_N; n++)
-              C[(outer_tile_m + tile_m + m) * N + (outer_tile_n + tile_n + n)] = acc[m][n];
         }
-      }
 
-    }  // TILE_N
-  }  // TILE_M
-}
+        A_tile1 += TILE_K1;
+        B_tile1 += TILE_K1;
+      }  // TILE_K1
+
+      for (int m = 0; m < TILE_M1; m++)
+        for (int n = 0; n < TILE_N1; n++)
+          C[(tile_m1 + m) * N + (tile_n1 + n)] = acc_l1[m][n];
+
+    }  // TILE_N1
+  }  // TILE_M1
 }
 
 #ifdef __ARM_NEON__

@@ -22,7 +22,7 @@ Resources:
 brew install google-benchmark
 
 # single core
-clang++ main.cc -Wall -std=c++17 -ffast-math -O3 -march=native -lbenchmark -lpthread -o main -framework Accelerate -DACCELERATE_NEW_LAPACK && ./main  --benchmark_counters_tabular=true
+clang++ main.cc -Wall -std=c++17 -ffast-math -O3 -march=native -lbenchmark -lpthread -o main -framework Accelerate -DACCELERATE_NEW_LAPACK && OMP_NUM_THREADS=1 ./main  --benchmark_counters_tabular=true
 
 # with OpenMP
 $(brew --prefix llvm)/bin/clang++ main.cc -Wall -std=c++17 -ffast-math -O3 -march=native -lbenchmark -lpthread -o main -framework Accelerate -DACCELERATE_NEW_LAPACK -fopenmp && ./main --benchmark_counters_tabular=true
@@ -52,7 +52,7 @@ g++ main.cc -Wall -std=c++17 -ffast-math -O3 -march=native -lbenchmark -lpthread
 # linker options generated with https://www.intel.com/content/www/us/en/developer/tools/oneapi/onemkl-link-line-advisor.html
 # change $CONDA_PREFIX to wherever your pip installs MKL to.
 pip install mkl-devel
-g++ main.cc -Wall -std=c++17 -ffast-math -O3 -march=native -lbenchmark -lpthread -o main -I$CONDA_PREFIX/include -L$CONDA_PREFIX/lib -m64 -Wl,--no-as-needed -lmkl_intel_ilp64 -lmkl_intel_thread -lmkl_core -liomp5 -lm -ldl && LD_LIBRARY_PATH=$CONDA_PREFIX/lib ./main --benchmark_counters_tabular=true
+g++ main.cc -Wall -std=c++17 -ffast-math -O3 -march=native -lbenchmark -lpthread -o main -I$CONDA_PREFIX/include -L$CONDA_PREFIX/lib -m64 -Wl,--no-as-needed -lmkl_intel_ilp64 -lmkl_intel_thread -lmkl_core -liomp5 -lm -ldl && LD_LIBRARY_PATH=$CONDA_PREFIX/lib OMP_NUM_THREADS=1 ./main --benchmark_counters_tabular=true
 ```
 
 Kernel name                    | Time (ms) | % of Intel MKL
@@ -75,3 +75,4 @@ Lessons learned:
 - Apple M1 and Ryzen 5600 have very different optimal kernel parameters (tile size). Perhaps with sufficient knowledge about data movements and CPU cache, someone can explain the difference...
 - OpenMP: `parallel` (start parallel region, create thread pool), `for`, `schedule(static,1)`, `collapse(2)` (collapse 2 for loops), `nowait` (don't wait for sync after for loop), `critical` (only 1 thread execute at a time), `atomic` (use hardware atomic op).
 - Using OpenMP may (and will) generate different code. One example is the compiler fail to auto-vectorize when there is OpenMP. Be extra careful.
+- If using OpenMP results in more than no. of physical of cores speedup, it means that the code is not taking advantage of ILP well i.e. it does not schedule enough independent instructions. Another way to check is to use `perf` and check for instructions/clock.

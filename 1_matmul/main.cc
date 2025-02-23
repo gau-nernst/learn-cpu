@@ -3,7 +3,7 @@
 #include <benchmark/benchmark.h>
 #include <iostream>
 
-const int alignment = 128;
+const int alignment = 256;
 const int M = 1024;
 const int N = 1024;
 const int K = 1024;
@@ -105,7 +105,7 @@ BENCHMARK(BM_matmul<neon_matmul<16, 16, 8>>)->Unit(benchmark::kMillisecond);
 BENCHMARK(BM_matmul<register_tile_matmul<1, 4, 4, 4>>)->Unit(benchmark::kMillisecond);
 BENCHMARK(BM_matmul<register_tile_matmul<2, 4, 4, 2>>)->Unit(benchmark::kMillisecond);
 BENCHMARK(BM_matmul<l1_tile_matmul<32, 32, 128>>)->Unit(benchmark::kMillisecond);
-// BENCHMARK(BM_matmul<tile_2level_matmul<16, 8, 4, 4, 2>>)->Unit(benchmark::kMillisecond);
+BENCHMARK(BM_matmul<tile_2level_matmul<16, 16, 128, 4, 4, 2>>)->Unit(benchmark::kMillisecond);
 #endif
 
 BENCHMARK_MAIN();

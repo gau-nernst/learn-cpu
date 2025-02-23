@@ -155,13 +155,12 @@ void l1_tile_matmul(const float * __restrict A,
   }
 }
 
-// currently this is slower
 template <int TILE_M1, int TILE_N1, int TILE_K1,
-          int TILE_M2, int TILE_N2, int TILE_K2>
-void tile_2level_matmul(const float * __restrict A,
-                        const float * __restrict B,
-                              float * __restrict C,
-                        int M, int N, int K) {
+          int TILE_M2, int TILE_N2>
+void l1_register_tile_matmul(const float * __restrict A,
+                             const float * __restrict B,
+                                   float * __restrict C,
+                             int M, int N, int K) {
   static_assert(TILE_M1 % TILE_M2 == 0);
   static_assert(TILE_N1 % TILE_N2 == 0);
 
@@ -174,45 +173,24 @@ void tile_2level_matmul(const float * __restrict A,
       // these will go to L1 cache
       const float *A_tile1 = A + tile_m1 * K;
       const float *B_tile1 = B + tile_n1 * K;
-      float acc_l1[TILE_M1][TILE_N1] = {{0.0f}};
+      float acc[TILE_M1][TILE_N1] = {{0.0f}};
 
       for (int tile_k1 = 0; tile_k1 < K; tile_k1 += TILE_K1) {
+        // for each of this TILE_K1 iteration, we will load
+        // A[TILE_M1][TILE_K1] and B[TILE_N1][TILE_K1] from
+        // RAM into L1.
 
-        for (int tile_m2 = 0; tile_m2 < TILE_M1; tile_m2 += TILE_M2) {
-          for (int tile_n2 = 0; tile_n2 < TILE_N1; tile_n2 += TILE_N2) {
-            const float *A_tile2 = A_tile1 + tile_m2 * K;
-            const float *B_tile2 = B_tile1 + tile_n2 * K;
-            float acc_reg[TILE_M2][TILE_N2] = {{0.0f}};
-
-            for (int tile_k2 = 0; tile_k2 < TILE_K1; tile_k2 += TILE_K2) {
-              float A_reg[TILE_M2][TILE_K2],
-                    B_reg[TILE_N2][TILE_K2];
-
-              // L1 -> registers
+        // NOTE: doing explicit A, B, C registers actually make it slower.
+        // it probably affect autovectorization codegen.
+        for (int tile_m2 = 0; tile_m2 < TILE_M1; tile_m2 += TILE_M2)
+          for (int tile_n2 = 0; tile_n2 < TILE_N1; tile_n2 += TILE_N2)
+            // load from L1 to registers.
+            // K is outer loop to improve AI
+            for (int k = 0; k < TILE_K1; k++)
               for (int m = 0; m < TILE_M2; m++)
-                for (int k = 0; k < TILE_K2; k++)
-                  A_reg[m][k] = A_tile2[m * K + k];
-
-              for (int n = 0; n < TILE_N2; n++)
-                for (int k = 0; k < TILE_K2; k++)
-                  B_reg[n][k] = B_tile2[n * K + k];
-
-              // K is outer loop to improve AI
-              for (int k = 0; k < TILE_K2; k++)
-                for (int m = 0; m < TILE_M2; m++)
-                  for (int n = 0; n < TILE_N2; n++)
-                    acc_reg[m][n] += A_reg[m][k] * B_reg[n][k];
-
-              A_tile2 += TILE_K2;
-              B_tile2 += TILE_K2;
-            }  // TILE_K2
-
-            // write registers -> L1
-            for (int m = 0; m < TILE_M2; m++)
-              for (int n = 0; n < TILE_N2; n++)
-                acc_l1[tile_m2 + m][tile_n2 + n] += acc_reg[m][n];
-          }
-        }
+                for (int n = 0; n < TILE_N2; n++)
+                  acc[tile_m2 + m][tile_n2 + n] += A_tile1[(tile_m2 + m) * K + k] *
+                                                   B_tile1[(tile_n2 + n) * K + k];
 
         A_tile1 += TILE_K1;
         B_tile1 += TILE_K1;
@@ -220,7 +198,7 @@ void tile_2level_matmul(const float * __restrict A,
 
       for (int m = 0; m < TILE_M1; m++)
         for (int n = 0; n < TILE_N1; n++)
-          C[(tile_m1 + m) * N + (tile_n1 + n)] = acc_l1[m][n];
+          C[(tile_m1 + m) * N + (tile_n1 + n)] = acc[m][n];
 
     }  // TILE_N1
   }  // TILE_M1
